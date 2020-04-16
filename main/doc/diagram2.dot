@@ -1,0 +1,23 @@
+graph {
+    label="Main Processes"
+    
+    RobotAgent[shape="box", style=rounded];
+    ControlTower[shape="box", style=rounded];
+    Planner[shape="box", style=rounded];
+    SLAM[shape="box", style=rounded];
+    Lidar[shape="box", style=rounded];
+    ControllerInterface[shape="box", style=rounded];
+    RobotMicroController[shape="box", style=rounded, color=blue];
+
+
+    RobotAgent--ControllerInterface
+    ControllerInterface--RobotMicroController
+    
+    
+    Planner--SLAM
+    SLAM--Lidar
+    ControlTower--Planner
+    RobotAgent--Planner
+
+
+}

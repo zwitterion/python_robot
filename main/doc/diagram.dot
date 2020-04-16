@@ -1,0 +1,38 @@
+digraph {
+    label="Architecture"
+
+    MessageBus[shape="box", style=rounded];
+
+    RobotAgent[shape="box", style=rounded];
+    ControlTower[shape="box", style=rounded];
+    Planner[shape="box", style=rounded];
+    SLAM[shape="box", style=rounded];
+    Lidar[shape="box", style=rounded];
+    ControllerInterface[shape="box", style=rounded];
+    RobotMicroController[shape="box", style=rounded];
+
+        
+    MessageBus->RobotAgent
+    RobotAgent->MessageBus
+
+    ControlTower->MessageBus
+    MessageBus->ControlTower
+
+    ControllerInterface->MessageBus
+    MessageBus->ControllerInterface
+
+    Planner->MessageBus
+    MessageBus->Planner
+
+    SLAM->MessageBus
+    MessageBus->SLAM
+
+    Lidar->MessageBus
+    MessageBus->Lidar
+
+    RobotMicroController->MessageBus
+    MessageBus->RobotMicroController
+
+
+
+}

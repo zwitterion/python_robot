@@ -1,0 +1,331 @@
+#include <EEPROM.h>
+#include <cppQueue.h>
+#include <MotorH25.h>
+#include <PulseCount.h>
+#include "MessageBus.h"
+#include "Message.h"
+#include "SBUS/sbus.h"
+#include "RobotAction.h"
+
+
+#define BAUD_RATE 9600 // 19200 38400 115200
+#define sgn(x) ((x) < 0 ? -1 : ((x) > 0 ? 1 : 0)) 
+
+unsigned int device_id;                        // 'unique' device id (random int)
+
+MessageBus mbus;
+Message msg;
+SBUS sbus;
+MotorH25 motorL(23); //, 19, 18);
+MotorH25 motorR(22); //, 20, 21);
+PulseCount odometer;
+
+RobotAction *robot_action;
+RobotAction *do_nothing = new DoNothing();
+
+int k=0;
+unsigned char reply_to = -1;
+
+unsigned long last_command_time = 0;
+unsigned long last_odometer_count =0;
+
+bool timeout = true;
+
+
+void set_speed(float vl, float vr) {
+    motorL.setPower(vl);
+    motorR.setPower(vr);
+
+    /*Serial3.print("Speed: ");
+    Serial3.print(vl, DEC);
+    Serial3.print(" ");
+    Serial3.print(vr, DEC);
+    Serial3.println(" ");*/
+
+}
+
+void action_completed() {
+  Serial3.println("Action Completed");
+
+  motorL.setPower(0.0);
+  motorR.setPower(0.0);
+
+
+  if (reply_to>=0)  {
+    msg.command = COMMAND_COMPLETED;
+    msg.params.command_completed.reply_to = reply_to;
+    msg.params.command_completed.status = 0;
+    msg.params.command_completed.left = odometer.get_counts_left();
+    msg.params.command_completed.right = odometer.get_counts_right();
+
+    mbus.send(0, &msg);
+    
+    Serial3.print("Reply command completed to");
+    Serial3.println(reply_to, DEC);
+}
+
+}
+RobotAction *move_to = new MoveTo(set_speed, action_completed);
+RobotAction *stop_action = new Stop(set_speed, action_completed);
+
+
+void serialEvent() {
+  last_command_time++;
+}
+
+unsigned int get_device_id()
+{
+  byte value = EEPROM.read(0);
+  if (value != 42) {
+    EEPROM.write(0, 42);
+    EEPROM.write(1, random(254));
+    EEPROM.write(2, random(254));
+  }
+
+  return  255*EEPROM.read(2) +  EEPROM.read(1);
+
+}
+
+
+void serialEvent2() {
+  sbus.read();
+}
+
+/*
+void stop()
+{
+  motorL.stop();
+  motorR.stop();
+}
+
+void set_motor_power(float power, float direction)
+{
+  // -1 < power < 1  -1 < direction < 1
+  // power = 0 -> stop   and direction = 0 -> straight
+
+  float d = power * sin(0.5 * direction * 3.1415927);
+
+  power = power > 0 ? power - abs(d) : power + abs(d);
+  
+  float powerr = power  - d/2.0;
+  float powerl = power  + d/2.0;
+  
+  motorR.setPower(powerr);
+  motorL.setPower(powerl);
+}
+*/
+
+
+// the setup routine runs once when you press reset:
+void setup() {
+  // initialize serial communication at 9600 bits per second:
+  Serial.begin(BAUD_RATE);
+  mbus.begin(Serial);
+
+  // initialize radio (Futaba) line - do not change baud rate (100000) or parity or stop bits (SERIAL_8E2)
+  Serial2.begin(100000, SERIAL_8E2);
+  sbus.begin(Serial2);
+
+  // debug/monitor
+  Serial3.begin(19200);
+  Serial3.println("initialized Serial3 Port");
+
+  motorL.initialize();
+  motorR.initialize();
+
+  odometer.begin();
+
+  randomSeed(analogRead(0)+analogRead(1));
+  device_id = get_device_id();
+  
+  // ensure motors are off
+  delay(20);
+  motorL.setPower(0);
+  motorR.setPower(0);
+  delay(20);
+
+  robot_action = do_nothing;
+
+}
+
+long readDistance(byte pingPin)
+{
+
+  // establish variables for duration of the ping,
+  // and the distance result in inches and centimeters:
+  long duration, inches, cm;
+
+  // The PING))) is triggered by a HIGH pulse of 2 or more microseconds.
+  // Give a short LOW pulse beforehand to ensure a clean HIGH pulse:
+  pinMode(pingPin, OUTPUT);
+  digitalWrite(pingPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(pingPin, HIGH);
+  delayMicroseconds(5);
+  noInterrupts();
+  digitalWrite(pingPin, LOW);
+
+  // The same pin is used to read the signal from the PING))): a HIGH
+  // pulse whose duration is the time (in microseconds) from the sending
+  // of the ping to the reception of its echo off of an object.
+  pinMode(pingPin, INPUT);
+  duration = pulseIn(pingPin, HIGH, 29*100);
+  interrupts();
+  // convert the time into a distance
+  // inches = microsecondsToInches(duration);
+  cm = microsecondsToCentimeters(duration);
+  return cm;
+}
+
+long microsecondsToInches(long microseconds) {
+  // According to Parallax's datasheet for the PING))), there are
+  // 73.746 microseconds per inch (i.e. sound travels at 1130 feet per
+  // second).  This gives the distance travelled by the ping, outbound
+  // and return, so we divide by 2 to get the distance of the obstacle.
+  // See: http://www.parallax.com/dl/docs/prod/acc/28015-PING-v1.3.pdf
+  return microseconds / 74 / 2;
+}
+
+long microsecondsToCentimeters(long microseconds) {
+  // The speed of sound is 340 m/s or 29 microseconds per centimeter.
+  // The ping travels out and back, so to find the distance of the
+  // object we take half of the distance travelled.
+  return microseconds / 29 / 2;
+}
+
+void publish_odometer_data()
+{
+    if (last_odometer_count != odometer.get_counts_left() + odometer.get_counts_right())
+    {
+      msg.command = COMMAND_ODOMETER;
+      msg.params.odometer.left = odometer.get_counts_left();
+      msg.params.odometer.right = odometer.get_counts_right();
+      mbus.send(0, &msg);
+      last_odometer_count = odometer.get_counts_left() + odometer.get_counts_right();
+      //Serial3.println("Update odometer status");
+    }
+}
+
+void loop() {
+  
+  mbus.run();
+
+  if (mbus.receive(0, &msg)) 
+  {
+    
+    switch(msg.command)
+    {
+      /*case (COMMAND_MOVE):
+        speed = (msg.params.move.speed - 1000.0) / 1000.0;
+        direction = (msg.params.move.direction - 9000.0) / 9000.0;
+        distance = msg.params.move.distance;
+        reply_to = msg.params.move.reply_to;
+        odometer.reset();
+        break;
+      */
+
+      case (COMMAND_STOP):
+        Serial3.println("received STOP message");
+        robot_action = stop_action;
+        reply_to = msg.params.stop.reply_to;
+        robot_action->begin();
+        odometer.reset();
+        break;
+      
+      case (COMMAND_MOVE):
+        float speed = 0;
+        float direction = 0;
+        unsigned int distance =0;
+
+        speed = (msg.params.move.speed - 1000.0) / 1000.0;
+        direction = (msg.params.move.direction - 9000.0) / 9000.0;
+        distance = msg.params.move.distance;
+        reply_to = msg.params.move.reply_to;
+        robot_action = move_to;
+        robot_action->begin();
+        
+
+        //
+        float d = speed * sin(0.5 * direction * 3.1415927);
+        float power = speed > 0 ? speed - abs(d) : speed + abs(d);
+        float powerr = power  - d/2.0;
+        float powerl = power  + d/2.0;
+        //
+        float dir_left  = sgn(powerl);
+        float dir_right = sgn(powerr);
+        float ratio = 1.0;//abs(cos(direction * 3.14159));   powerl/powerr ???
+
+
+        robot_action->set_parameters(distance, ratio, speed, dir_left, dir_right);
+        odometer.reset();
+
+        Serial3.println("received a message");
+        Serial3.print(msg.command, DEC);
+        Serial3.print(" ");
+        Serial3.print(speed);
+        Serial3.print(" ");
+        Serial3.print(direction);
+        Serial3.print(" ");
+        Serial3.print(distance);
+        Serial3.print(" ");
+        Serial3.print(dir_left);
+        Serial3.print(" ");
+        Serial3.print(dir_right);
+        Serial3.print(" ");
+        Serial3.print(powerl);
+        Serial3.print(" ");
+        Serial3.print(powerr);
+
+        Serial3.println("");
+
+        
+        break;
+
+      /*case (COMMAND_MOVE_TO):
+        speed = (msg.params.move.speed - 1000.0) / 1000.0;
+        direction = (msg.params.move.direction - 9000.0) / 9000.0;
+        distance = msg.params.move.distance;
+        reply_to = msg.params.move.reply_to;
+
+        robot_action = move_to;
+        robot_action->begin();
+        robot_action->set_parameters(distance, 1.0, speed, FORWARD, FORWARD);
+        odometer.reset();
+        break;
+        */
+
+    } 
+    
+    
+
+    last_command_time = millis();
+  }
+
+  if (k%100==0) {
+    // every 100ms send futaba channels
+    msg.command = COMMAND_FUTABA;
+    msg.params.futaba.status = sbus.getStatus();
+    if (msg.params.futaba.status == 0) {
+      // if the controller is not OFF (0=OK, else error, =12 is OFF)
+      for (byte c=0;c<16;c++)
+        msg.params.futaba.channel[c] = sbus.getChannel(c);
+      mbus.send(0, &msg);
+    }
+  }
+
+  if (k%100==0) {
+    publish_odometer_data();
+  }
+
+  if (k%20 == 0)
+  {
+    robot_action->set_odometer(odometer.get_counts_left() , odometer.get_counts_right() );
+    robot_action->loop();
+  }
+ 
+  k++;
+
+
+  delay(1);  
+  
+}

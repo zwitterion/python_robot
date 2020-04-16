@@ -1,0 +1,1 @@
+ ~/arduino-cli/bin/arduino-cli lib install SerialTransfer
