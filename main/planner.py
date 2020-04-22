@@ -8,7 +8,7 @@ import networkx as nx
 
 from messagebus_manager import MessageBusManager
 from config import Config
-from message import Message, Command
+from message import Message
 
 class Planner():
     def __init__(self, config):
@@ -118,12 +118,13 @@ class Planner():
         self.close()
 
 class Map():
-    def __init__(self, grid_size):
+    def __init__(self, grid_size, config=None):
         self.config = config
         self.grid = np.ones(grid_size)
         self.robot_position = [-1,-1,0]
         self.target_position = [-1,-1]
         self.path = []
+        self.path_cost = 1e10
         
         # create grid graph
         self.graph = nx.grid_graph(dim=list(grid_size) )
@@ -164,11 +165,25 @@ class Map():
             self.graph.edges[e]["weight"] =  (self.graph.nodes[e[0]]["weight"] + self.graph.nodes[e[1]]["weight"])/2.0
 
         # get path
-        self.path = self.get_path()
+        new_path = self.get_path()
+        
+        # get new path cost
+        new_path_cost = self.get_path_cost(new_path)
 
-        #print("PATH")
-        for n in self.path:
-            print( self.graph.nodes[n] )
+        # is it worth changing the path?
+        if ((len(self.path)>1) and (len(new_path)>1) and (self.path[-1] == new_path[-1])):
+            # if target has not changed
+            if len(self.path) > len(new_path):
+                last_part = self.path[-len(new_path):] 
+                old_cost = self.get_path_cost(last_part)
+                if new_path_cost >= 0.7 * old_cost:
+                    # if new cost is similar to old cost do not change paths
+                    new_path = last_part
+                    new_path_cost = old_cost
+                    print("Stick with the old path.......................")
+
+        self.path = new_path
+        self.path_cost = new_path_cost
 
         return
 
@@ -190,6 +205,19 @@ class Map():
         # debug
 
         return path
+
+    def get_path_cost(self, path):
+        
+        cost  = 0
+        if (len(path) < 1):
+            return 0
+
+        for e in zip(path,path[1:]):
+            cost = cost + self.graph.edges[e[0], e[1]]["weight"]
+        return cost
+
+
+
 
     def tolist(self):
 

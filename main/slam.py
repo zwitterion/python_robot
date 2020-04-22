@@ -10,11 +10,12 @@ https://simondlevy.academic.wlu.edu/files/students/BreezySLAM_SurajBajracharya.p
 '''
 import os
 import numpy as np
+from scipy import signal
 from PIL import Image
 import multiprocessing as mp
 from messagebus_manager import MessageBusManager, ProcessNames, TopicNames
 from config import Config
-from message import Message, Command
+from message import Message
 from timeit import default_timer as timer
 
 from breezyslam.algorithms import RMHC_SLAM
@@ -34,6 +35,8 @@ class ArloRobot(WheeledVehicle):
     def __init__(self):
         # d=155mm 
         WheeledVehicle.__init__(self, wheelRadiusMillimeters=77.5, halfAxleLengthMillimeters=190.5)
+        previous_left_wheel = 0
+        previous_right_wheel = 0
 
     def extractOdometry(self, timestamp, leftWheelOdometry, rightWheelOdometry):
 
@@ -117,25 +120,17 @@ class SLAM():
         self.slam.getmap(self.mapbytes)
         base_grid = np.array(self.mapbytes).reshape(MAP_SIZE_PIXELS, MAP_SIZE_PIXELS)
         
-        """
-        grid = np.ones(self.grid_size)
-
-        r_size = int(MAP_SIZE_PIXELS / self.grid_size[0])
-        c_size =  int(MAP_SIZE_PIXELS / self.grid_size[1])
-
-        # reduce map into smaller grid taking mean of (r_size. c_size) adjacent cells
-        for r in range(0, self.grid_size[0]):
-            for c in range(0, self.grid_size[1]):
-                row = r_size * r
-                col = c_size * c
-                grid[r,c] = base_grid[row:(row+r_size),col:(col+c_size)].mean()
-        """
         grid = self.resize_array(base_grid, self.grid_size, resample=Image.NEAREST)
 
+        if self.config["slam.set_boundaries"]:
+            grid = self.set_boundaries(grid.copy(), 1500)
+
         # scale robot position to grid coordinates
-        robot_x_grid = (robot_x/(1000*MAP_SIZE_METERS))*self.grid_size[0] 
-        robot_y_grid = (robot_y/(1000*MAP_SIZE_METERS))*self.grid_size[1] 
+        robot_x_grid = (robot_x/(1000*MAP_SIZE_METERS))*( self.grid_size[0] - 1)
+        robot_y_grid = (robot_y/(1000*MAP_SIZE_METERS))*( self.grid_size[1] - 1)
         
+        #if robot_x_grid > self.grid_size[0]
+
         #print("robotx", robot_x, robot_x_grid)
 
         self.config.log.info("slam sending map to ({})".format(send_to_address))
@@ -145,11 +140,32 @@ class SLAM():
 
         return 
 
+
     def resize_array(self, a, size, resample=Image.NEAREST):
         img = Image.fromarray(a) #, 'L')
         img2 = img.resize(size, resample=resample)
         return np.asarray(img2)
+
+    def set_boundaries(self, grid, threshold):
+        """
+         adds a boundary region around obstacles (increases the size of the obstacles)
+        """
+        scharr = np.array([[ -3-3j, 0-10j,  +3 -3j],
+                        [-10+0j, 0+ 0j, +10 +0j],
+                        [ -3+3j, 0+10j,  +3 +3j]]) # Gx + j*Gy
+
+        dark = np.where(grid<200)
+        grid[dark] = 0
+
+        grad = signal.convolve2d(grid, scharr, boundary='symm', mode='same')
+        mask = np.absolute(grad)
+        mask[np.where(mask<threshold)] = 0
+        mask[np.where(mask>=threshold)] = 128 # 255
+        new_grid = grid-mask
+        new_grid[np.where(new_grid < 0)]=0
         
+        return new_grid
+
     def handle_invalid_command_id(self, msg):
         self.config.log.warning("slam received an unknown command ({})".format(str(msg.cmd)))
         return 

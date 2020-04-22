@@ -206,12 +206,6 @@ void publish_odometer_data()
     }
 }
 
-void report(int num, ...) {
-
-  va_list valist;
-
-}
-
 void loop() {
   
   mbus.run();
@@ -224,7 +218,7 @@ void loop() {
 
     switch(msg.command) {
 
-      case COMMAND_MOVE: {
+      case COMMAND_MOVE:
         Serial3.println("");
         Serial3.print("COMMAND_MOVE ");
         Serial3.print(msg.command, DEC);
@@ -254,7 +248,6 @@ void loop() {
         robot_action->set_parameters(distance, ratio, speed, dir_left, dir_right);
         odometer.reset();
 
-        report(speed, direction, distance);
         Serial3.print(" ");
         Serial3.print(speed);
         Serial3.print(" ");
@@ -271,34 +264,28 @@ void loop() {
         Serial3.print(powerr);
 
         Serial3.println("");
-        }
+
         break;
 
-      case COMMAND_PATH_ERROR: {
+      /*case 102: //COMMAND_PATH_ERROR: 
         Serial3.print("COMMAND_PATH_ERROR");
 
-        float path_error = (msg.params.move_error.error/ 1000.0) - 0.5;
-        //float correction  = 10 * path_error;
+        float path_error = (msg.params.move_error.error/ 100.0) - 0.5;
         float wheel_ratio = 1.0 + 1.0 * path_error;  // 1-> both wheels same speed  
-        robot_action->set_wheel_ratio(wheel_ratio);
-        //odometer.reset_trip();
-        //robot_action->set_wheel_correction(correction);
-
+        //robot_action->set_wheel_ratio(wheel_ratio);
         Serial3.print("path error=");
         Serial3.print(path_error, DEC);
         Serial3.print("wheel ratio=");
         Serial3.print(wheel_ratio, DEC);
         Serial3.println("");
-        }
         break;
-    
-      case COMMAND_STOP: {
+    */
+      case COMMAND_STOP:
         Serial3.println("received STOP message");
         robot_action = stop_action;
         reply_to = msg.params.stop.reply_to;
         robot_action->begin();
         odometer.reset();
-        }
         break;
       
 
@@ -306,7 +293,20 @@ void loop() {
         Serial3.println("INVALID COMMAND");
         break;
 
-    }
+      /*case (COMMAND_MOVE_TO):
+        speed = (msg.params.move.speed - 1000.0) / 1000.0;
+        direction = (msg.params.move.direction - 9000.0) / 9000.0;
+        distance = msg.params.move.distance;
+        reply_to = msg.params.move.reply_to;
+
+        robot_action = move_to;
+        robot_action->begin();
+        robot_action->set_parameters(distance, 1.0, speed, FORWARD, FORWARD);
+        odometer.reset();
+        break;
+        */
+
+    } 
     
     
 

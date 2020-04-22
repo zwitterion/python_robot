@@ -8,7 +8,7 @@ import numpy as np
 
 from messagebus_manager import MessageBusManager, ProcessNames, TopicNames
 from config import Config
-from message import Message, Command
+from message import Message#, Command
 #from pySerialTransfer 
 import pySerialTransfer as txfer
 
@@ -199,6 +199,21 @@ class ProcessOutgoingData (threading.Thread):
                         self.config.log.info("ProcessOutgoingData sent via serial: Comand:{}".format(cmd) )
                     else:
                         self.config.log.error("ProcessOutgoingData could not send via serial: Comand:{}".format(cmd) )
+                elif cmd == Message.move_error:
+                    self.link.txBuff[0] = Message.move_error
+
+                    error = min(params[0], 0.5) if params[0] >=0 else max(params[0], -0.5)
+                    error = int( (error+0.5)*1000)
+                    self.link.txBuff[1] = (error & 0x00FF)
+                    self.link.txBuff[2] = (error >> 8)
+                    
+                    self.link.txBuff[3] = reply_to_int
+
+                    if self.link.send(4):
+                        self.config.log.info("ProcessOutgoingData sent via serial: Comand:{}".format(cmd) )
+                    else:
+                        self.config.log.error("ProcessOutgoingData could not send via serial: Comand:{}".format(cmd) )
+
                 else:
                     self.config.log.error("ProcessOutgoingData : invalid comand:{}".format(cmd) )
 
@@ -277,17 +292,19 @@ class ControllerInterface():
             try:
                 msg = self.message_bus.receive(self.name)
 
-                if (msg.cmd == Command.shutdown):
+                if (msg.cmd == Message.shutdown):
                     config.log.info("{} received shutdown command".format(self.name) )
                     done = True
                     break
                 
-                if (msg.cmd == Command.move):
+                if (msg.cmd == Message.move):
                     self.send_items.put(msg)
 
-                if (msg.cmd == Command.stop):
+                if (msg.cmd == Message.stop):
                     self.send_items.put(msg)
 
+                if (msg.cmd == Message.move_error):
+                    self.send_items.put(msg)
 
             except (KeyboardInterrupt, SystemExit):
                 config.log.warning("{} received Ctrl+C ".format(self.name))

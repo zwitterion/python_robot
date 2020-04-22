@@ -16,6 +16,7 @@ class Message(object):
   set_target_position = 11
 
   move = 100
+  move_error = 102
   command_completed = 200
   echo =210
   debug=220  
@@ -51,6 +52,7 @@ if __name__ == "__main__":
     msg = Message(1)
     print(msg.to_json())
     
+"""
 class Command():
   
   status = 1
@@ -66,6 +68,6 @@ class Command():
 
 
   pass
-
+"""
 
 

@@ -32,6 +32,17 @@ class RobotAction {
          left_direction = left_direction_;
          right_direction = right_direction_;
       }
+
+      void set_wheel_ratio(float wheel_ratio_)
+      {
+         wheel_ratio  = wheel_ratio_;
+      }
+
+
+      /*void set_course_correction(int correction_)
+      {
+         correction = correction_;
+      }*/
    
    protected:
       int left_count;
@@ -45,6 +56,8 @@ class RobotAction {
       void (*motor_speed_cb) (float, float);
       void (*action_completed_cb)();
       int previous_error;
+
+      //int correction=0;
 
 };
  
@@ -181,7 +194,7 @@ class MoveTo: public RobotAction {
 
                   motor_speed_cb(left_direction * vl, right_direction * vr);
 
-                  report(step_counter,left_direction*vl, right_direction*vr, left_direction*left_count, right_direction*right_count, cutoff_start);
+                  // report(step_counter,left_direction*vl, right_direction*vr, left_direction*left_count, right_direction*right_count, cutoff_start);
 
                   previous_error = error;
                   step_counter++;         

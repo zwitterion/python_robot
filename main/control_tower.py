@@ -12,7 +12,7 @@ import tkinter as tk
 from PIL import Image, ImageTk
 
 from config import Config
-from message import Message, Command
+from message import Message
 from messagebus_manager import MessageBusManager, ProcessNames
 
 #class MessageBusManager(BaseManager):

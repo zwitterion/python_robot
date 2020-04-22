@@ -4,7 +4,7 @@ import multiprocessing as mp
 import time
 import numpy as np
 from messagebus import MessageBus, MessageBusProxy
-from message import Message, Command
+from message import Message #, Command
 from config import Config
 from messagebus_manager import MessageBusManager, ProcessNames
 
@@ -14,8 +14,8 @@ from radio_controller import FutabaController
 
 class goal_sources():
     radio_controller ="radio"
-    control_tower="control_tower"
-    plan="plan"
+    #control_tower="control_tower"
+    #plan="plan"
 
 
 def futaba(msg, goals):
@@ -43,14 +43,14 @@ def futaba(msg, goals):
         direction = radio.get_direction()
         speed = radio.get_speed()
         msg = Message(Message.move, params=[speed, direction, 101])
-        return "serial_adapter", msg
+        return ProcessNames.controller_interface, msg
 
     return None, None
 
-def odometer(msg, goals):
-    config.log.info("bootstrap is running the odometer handler")
-    config.log.info("odometer= ({},{})".format(msg.params[0], msg.params[1]))
-    return None, None
+#def odometer(msg, goals):
+#    config.log.info("bootstrap is running the odometer handler")
+#    config.log.info("odometer= ({},{})".format(msg.params[0], msg.params[1]))
+#    return None, None
 
 def do_nothing(msg, plans):
     return None, None
@@ -60,10 +60,11 @@ def invalid_command_id(msg, state):
     return None
 
 command_handlers = {
-    Command.futaba:futaba,
-    Command.odometer:odometer,
+    Message.futaba:futaba,
+    #Message.odometer:odometer,
 }   
 
+"""
 def make_plan(state, goals):
     radio = goals[goal_sources.radio_controller]
     radio_changes = goals[goal_sources.radio_controller+".changed"] 
@@ -85,13 +86,12 @@ def make_plan(state, goals):
         actions.append( ("scheduled_action?",))
 
     return actions
+"""
 
 if __name__ == '__main__':
     config = Config()
     mp.current_process().authkey = config['authkey']
     
-    # goals represent what we want the robot to do
-    # 
     goals = {goal_sources.radio_controller: None}
     state = {}
 
@@ -101,15 +101,15 @@ if __name__ == '__main__':
         
         message_bus = message_bus_manager.mbus(config)
 
-        message_bus.send(ProcessNames.lidar, Message(command=Command.start))
-        message_bus.send(ProcessNames.controller_interface, Message(command=Command.start))
+        message_bus.send(ProcessNames.lidar, Message(command=Message.start))
+        message_bus.send(ProcessNames.controller_interface, Message(command=Message.start))
         
-        # start executor in local process - you can turn this off and start 
-        # remotly using: "python executor.py"
-        #lidar_worker = lidar.start(config)
+        # start Lidar in local process - you can turn this off and start remotely using: "python lidar.py"
+        lidar_worker = None
         lidar_worker = LidarAgent.start_process(config)
+        
+        controller_interface_worker = None
         controller_interface_worker  = ControllerInterface.start_process(config)
-
 
         # wait until a message is received
         while True:
@@ -117,9 +117,9 @@ if __name__ == '__main__':
                 msg = message_bus.receive(ProcessNames.bootstrap)
                 config.log.info("bootstrap received: "  + msg.to_json())
                 
-                if msg.cmd == Command.shutdown: 
+                if msg.cmd == Message.shutdown: 
                     # shutdown all
-                    msg=Message(command=Command.shutdown) 
+                    msg=Message(command=Message.shutdown) 
                     for address in ProcessNames.__dict__.keys():
                         message_bus.send(address, msg)
                         
@@ -142,8 +142,11 @@ if __name__ == '__main__':
         #lidar_worker.terminate()
         controller_interface_worker.terminate()
 
-        lidar_worker.join()
-        controller_interface_worker.join()
+        if (lidar_worker is not None):
+            lidar_worker.join()
+
+        if (controller_interface_worker is not None):
+            controller_interface_worker.join()
         
     time.sleep(1)
     config.close()

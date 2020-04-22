@@ -7,7 +7,7 @@ import time
 import queue
 
 from config import Config
-from message import Message, Command
+from message import Message #, Command
 from messagebus_manager import MessageBusManager, ProcessNames, TopicNames
 
 from rplidar import RPLidar
@@ -145,7 +145,7 @@ class LidarAgent():
                         self.message_bus.send(msg.reply_to, Message(Message.lidar_data, self.lidar_data.tolist()))
                         continue
 
-                if (msg.cmd == Command.shutdown):
+                if (msg.cmd == Message.shutdown):
                     self.config.log.info("lidar received shutdown command")
                     break
                 

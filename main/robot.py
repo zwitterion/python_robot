@@ -2,16 +2,34 @@ import os
 import sys
 import multiprocessing as mp
 import traceback
-from messagebus_manager import MessageBusManager, ProcessNames, TopicNames
-from config import Config
-from message import Message, Command
+from collections import namedtuple
 from timeit import default_timer as timer
 import numpy as np
+import math
+
+from messagebus_manager import MessageBusManager, ProcessNames, TopicNames
+from config import Config
+from message import Message#, Command
+
 
 class RobotStates():
     is_idle = 0
     is_rotating = 1
     is_moving = 2
+    is_waiting_for_map_update = 3
+    state_strings = {is_idle: "idle",
+                     is_rotating: "rotate",
+                     is_moving: "move",
+                     is_waiting_for_map_update: "waiting_for_map",
+                    }
+    @staticmethod
+    def to_string(s):
+        return RobotStates.state_strings[s]
+
+class Odometer():
+    def __init__(self, l,r):
+        self.left_wheel = l
+        self.right_wheel = r
 
 class Robot():
     def __init__(self, config):
@@ -27,9 +45,16 @@ class Robot():
         self.wait_for_map = False
         self.handlers = []
         self.message_bus = None
+        self.odometer = Odometer(0,0)
+        # set before starting to move to track coordinates of next stop/major change in direction
+        self.next_stop = [-1, -1]
 
-        self.steps_per_turn = 100.0
-        self.steps_per_cell = 15.
+        # tracks last value of robot orientation returned by SLAM. It is used to determine when orienation stops changing
+        # after a rotation, it might be unstable for few milliseconds 
+        self.last_robot_orientation = 999
+
+        self.steps_per_turn = 98.0
+        self.steps_per_cell = 20.
 
         return
 
@@ -105,42 +130,81 @@ class Robot():
         self.path = msg.params['path']
 
 
-        #path_error = self.get_path_error()
-        #print("error", path_error)
         robot_orientation = self.get_current_orientation()
-        
-        self.config.log.info("x: %6.2f y: %6.2f  target theta: %6.2f current theta: %6.2f" % (self.robot_position[0], self.robot_position[1], self.target_theta, robot_orientation))
+
+        distance = 0
+        if self.state == RobotStates.is_moving:
+            distance = self.euclidean_distance(self.robot_position[0:2], self.next_stop)
+
+        path_error = self.get_path_error()
+        #print("error", path_error)
+
+
+        self.config.log.info("state: %s  x: %6.2f y: %6.2f odom.: (L:%3d, R:%3d) ed=%6.2f trgt theta: %6.2f curr. theta: %6.2f error: %6.2f" % 
+                (RobotStates.to_string(self.state), 
+                self.robot_position[0], 
+                self.robot_position[1], 
+                self.odometer.left_wheel,
+                self.odometer.right_wheel,
+                distance,
+                self.target_theta, 
+                robot_orientation,
+                path_error))
 
         # if robot is busy and the path has changed then something is wrong - tell robot to cancel 
         # then it will continue with the new path
         if self.state == RobotStates.is_moving:
-            if self.path != self.active_path[len(self.active_path)-len(self.path):]:
+            #@@@@@@@
+            #if self.path != self.active_path[len(self.active_path)-len(self.path):]:
+            if (len(self.path)>=2) and (self.active_path[-len(self.path):][0:2] != self.path[0:2]): 
                 print ("STOP !!!!!!!!!!!*****************************")
-                print(self.path,"\n", self.active_path[len(self.active_path)-len(self.path):] )
+                print("path:", self.path,"\n", "active:", self.active_path[-len(self.path):] )
                 self.stop()
+            else:
+                self.send_move_error(path_error)
 
-        if self.wait_for_map:
-            # reset busy
-            self.state = RobotStates.is_idle
-            self.wait_for_map = False
+        if self.state == RobotStates.is_waiting_for_map_update:
+            if self.is_orientation_stable(robot_orientation): 
+                # reset to idle
+                self.state = RobotStates.is_idle
+            else:
+                print("***unstable")
 
         return
 
     def on_odometer_update(self, msg):
-        #print("ODOMETER!!!!!!!!!", msg)
+        if (len(msg.params) >=2):
+            self.odometer.left_wheel = msg.params[0]
+            self.odometer.right_wheel = msg.params[1]
+        else:
+            self.config.log.error("robot: {} received bad odometer data".format(self.name))    
         return
 
     def on_command_completed(self, msg):
         self.config.log.info("robot: {} completed an action".format(self.name))
         # wait for new map with robot position updated
         # reset state to idle once a new map arrives
-        self.wait_for_map = True
+        if (len(msg.params) >=4):
+            self.odometer.left_wheel = msg.params[2]
+            self.odometer.right_wheel = msg.params[3]
+
+        # wait for next map/position update (and ofr the orientation become stable)
+        self.state  = RobotStates.is_waiting_for_map_update
 
         return
 
     def on_invalid_command_id(self, msg):
             self.config.log.warning("robot: {} received an unknown command ({})".format(self.name, str(msg.cmd)))
             return
+
+    def is_orientation_stable(self, new_orientation):
+        """
+        Returns true when orientation stops changing for less tha 1.0
+        """
+        stable = abs(self.last_robot_orientation - new_orientation) < 1.0
+        self.last_robot_orientation = new_orientation
+        return stable    
+
 
     def get_current_orientation(self):
         robot_orientation = self.robot_position[2]
@@ -173,6 +237,7 @@ class Robot():
             a = (dx/dy) 
             b = -a*p0[1] + p0[0]
             error = (a * self.robot_position[1] + b) - self.robot_position[0]
+            #error =  -error
         else:
             #???
             error = 0
@@ -201,10 +266,16 @@ class Robot():
         if not self.rotate(theta, robot_orientation):
             # if we don't need to rotate then move
             distance = self.get_max_distance(self.path)
+            
+            self.next_stop = self.path[distance]
             assert distance>=0, "distance should be >=0"
             
             if (distance>0):
-                self.move(distance)
+            
+                next_stop = self.path[distance]
+                euclidean_distance = self.euclidean_distance(self.robot_position[0:2], next_stop)
+
+                self.move(euclidean_distance)
             else:
                 self.state = RobotStates.is_idle
         return
@@ -259,8 +330,12 @@ class Robot():
         #print("ROTATING:", speed, heading, steps )
         assert steps >= 0, "invalid # of steps"
 
-        if (steps>0):
-            self.config.log.info("Robot is starting to rotate to: {}".format(alpha))
+        rotate_threshold_in_steps = 2
+        # rotating for small distances does not work quite well with this robot
+        # and can start oscillating...
+        # todo: upgrade arduino code to use microsteps for higher resolution..
+        if (steps>rotate_threshold_in_steps):
+            self.config.log.info("Robot is starting to rotate to: {}   v:{} h:{} steps:{}".format(alpha, speed, heading, steps))
             msg = Message(Message.move, params=[speed, heading, steps])
             msg.reply_to = self.name
             self.message_bus.send(ProcessNames.controller_interface , msg)
@@ -271,14 +346,25 @@ class Robot():
 
    
 
-    def move(self, distance, speed=0.3):
-        self.config.log.info("Robot is starting to move: {} unit(s)".format(distance))
+    def move(self, distance, speed=0.6):
+        
         heading = 0
+        #next_stop = self.path[distance]
+        #distance = self.euclidean_distance(self.robot_position[0:2], next_stop)
         steps = int(distance * self.steps_per_cell)
+
+        self.config.log.info("Robot is starting to move: {:6.3f} unit(s) v:{} h:{} steps:{}".format(distance, speed, heading, steps))
         msg = Message(Message.move, params=[speed, heading, steps])
         msg.reply_to = self.name
         self.message_bus.send(ProcessNames.controller_interface, msg)
         self.state = RobotStates.is_moving
+        return
+
+    def send_move_error(self, path_error):
+        #self.config.log.info("move error: {:6.3f} ".format(path_error))
+        msg = Message(Message.move_error, params=[path_error*0.1])
+        msg.reply_to = self.name
+        self.message_bus.send(ProcessNames.controller_interface, msg)
         return
 
     def stop(self):
@@ -299,6 +385,11 @@ class Robot():
         while (i < len(path)-1 ) and (self.get_cell_rotation(path[i], path[i+1]) == r):
             i+=1
         return i
+
+    def euclidean_distance(self, p0, p1):
+        return np.linalg.norm(np.array(p1)-np.array(p0))
+        #return math.sqrt(math.pow(p0[0]-p1[0], 2) + math.pow(p0[1]-p1[1], 2))
+
 
     def log(self, text):
         self.config.log.info(self.name + ": " + text)

@@ -9,8 +9,9 @@
 #define COMMAND_FUTABA 2
 #define COMMAND_ODOMETER 3
 #define COMMAND_STOP 5
-#define COMMAND_MOVE 100      // obsolete use COMMAND_MOVE_TO
+#define COMMAND_MOVE 100      
 #define COMMAND_MOVE_TO 101
+#define COMMAND_PATH_ERROR 102
 
 #define COMMAND_COMPLETED 200
 
@@ -34,6 +35,10 @@ class Message
          struct {
             unsigned char reply_to;
         } stop;
+        struct {
+            int error;  // 0-1000  500->no error
+            unsigned char reply_to;
+        } move_error;
         struct {
             int status;
             int channel[16];

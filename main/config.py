@@ -19,6 +19,9 @@ class Config(dict):
 
         self['map_grid_size'] = (40,40)  # 20 20 
 
+        #slam
+        self['slam.set_boundaries'] = True
+
         self.log = None
         if logger is None:
             self.log = self.init_logger() 
