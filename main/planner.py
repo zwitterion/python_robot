@@ -171,6 +171,7 @@ class Map():
         new_path_cost = self.get_path_cost(new_path)
 
         # is it worth changing the path?
+        """
         if ((len(self.path)>1) and (len(new_path)>1) and (self.path[-1] == new_path[-1])):
             # if target has not changed
             if len(self.path) > len(new_path):
@@ -178,10 +179,11 @@ class Map():
                 old_cost = self.get_path_cost(last_part)
                 if new_path_cost >= 0.7 * old_cost:
                     # if new cost is similar to old cost do not change paths
+                    print("Stick with the old path.......................", new_path_cost, old_cost)
                     new_path = last_part
                     new_path_cost = old_cost
-                    print("Stick with the old path.......................")
-
+                    
+        """
         self.path = new_path
         self.path_cost = new_path_cost
 

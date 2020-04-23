@@ -163,24 +163,30 @@ class Robot():
                 self.stop()
 
         if self.state == RobotStates.is_moving:
-            if (len(self.path)>=2) and (self.active_path[-len(self.path):][0:2] != self.path[0:2]): 
-                # if robot is busy and the path has changed then something is wrong - tell robot to cancel 
-                # then it will continue with the new path
-                print ("STOP !!!!!!!!!!!*****************************")
-                print("path:", self.path,"\n", "active:", self.active_path[-len(self.path):] )
-                self.stop()
+            if (len(self.path)>=2):
+                
+                euclidean_distance = self.euclidean_distance(self.robot_position[0:2], self.path[1])
+                active_path = self.active_path[-len(self.path):][0:2]
+                if len(self.path)>=2 and active_path[0:2] != self.path[0:2] and self.get_cell_rotation(active_path[0], active_path[1]) in [-90,90,180,-180]:
+                    # if robot is busy and the path has changed then something is wrong - tell robot to cancel 
+                    # then it will continue with the new path
+                    # ignore if was moving in a diagonal
+                    print ("STOP !!!!!!!!!!!*****************************")
+                    print("path:", self.path,"\n", "active:", self.active_path[-len(self.path):], "\neucl dist:", euclidean_distance, "\nobot:", self.robot_position )
+                    self.stop()
+                    return
+
+            # update move parameters
+                # get max travel distance (without requiring a rotation)
+            distance = self.get_max_distance(self.path)
+            if (distance < len(self.path)):
+                self.next_stop = self.path[distance]
+                euclidean_distance = self.euclidean_distance(self.robot_position[0:2], self.next_stop)
+                heading = np.clip(-orientation_error, -5, 5)
+                speed = 0.6 if distance >= 2 else 0.3
+                self.move(euclidean_distance, speed=speed, heading=heading)
             else:
-                # update move parameters
-                 # get max travel distance (without requiring a rotation)
-                distance = self.get_max_distance(self.path)
-                if (distance < len(self.path)):
-                    self.next_stop = self.path[distance]
-                    euclidean_distance = self.euclidean_distance(self.robot_position[0:2], self.next_stop)
-                    heading = np.clip(-orientation_error, -5, 5)
-                    speed = 0.6 if distance >= 2 else 0.3
-                    self.move(euclidean_distance, speed=speed, heading=heading)
-                else:
-                    print("Why is distance wrong?", distance, self.path)
+                print("Why is distance wrong?", distance, self.path)
 
         if self.state == RobotStates.is_waiting_for_map_update:
             if self.is_orientation_stable(robot_orientation): 
