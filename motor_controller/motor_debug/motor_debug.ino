@@ -73,7 +73,7 @@ void loop() {
   {
     robot_action = move_to;
     robot_action->begin();
-    robot_action->set_parameters(200, 1.0, 0.8, FORWARD, FORWARD);
+    robot_action->set_parameters(2000, 1.0, 0.8, FORWARD, FORWARD);
     start_action = false;
     odometer.reset();
   }

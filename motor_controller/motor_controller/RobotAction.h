@@ -27,28 +27,33 @@ class RobotAction {
       void set_parameters(int target_count_, float wheel_ratio_, float max_velocity_, float left_direction_, float right_direction_)
       {
          target_count = target_count_;
-         wheel_ratio  = wheel_ratio_;
          max_velocity = max_velocity_;
          left_direction = left_direction_;
          right_direction = right_direction_;
-      }
-
-      void set_wheel_ratio(float wheel_ratio_)
-      {
          wheel_ratio  = wheel_ratio_;
       }
 
-
-      /*void set_course_correction(int correction_)
+      bool is_running() 
       {
-         correction = correction_;
-      }*/
+         return state == ACTION_RUNNING;
+      }
+
+      // sets wheel ratio and restes base counters use for tracking wheel speeds/counts
+      void set_wheel_ratio(float wheel_ratio_)
+      {
+         wheel_ratio  = wheel_ratio_;
+
+         left_base = left_count;
+         right_base = right_count;
+
+      }
+
    
    protected:
       int left_count;
       int right_count;
       int target_count;
-      int state;
+      int state = ACTION_NOT_STARTED;
       float wheel_ratio;
       float max_velocity;
       float left_direction=0;
@@ -56,6 +61,10 @@ class RobotAction {
       void (*motor_speed_cb) (float, float);
       void (*action_completed_cb)();
       int previous_error;
+
+      // tracks when westart counting again for speed control
+      int left_base;
+      int right_base;
 
       //int correction=0;
 
@@ -111,11 +120,6 @@ void report(int step_counter,float vl, float vr,int lcount, int rcount, float cu
     //Serial3.println(cutoff_start);
 }
 
-int sign(int x) {
-   return x/abs(x); 
-}
-
-
 class MoveTo: public RobotAction {
    private:
       int step_counter;
@@ -136,14 +140,12 @@ class MoveTo: public RobotAction {
       } 
 
       void begin() {
-
          state = ACTION_NOT_STARTED;
          left_count = 0;
          right_count = 0;
          step_counter = 0;
          previous_error = 1e4;
       }
-      
       
       void loop() { 
          float v;
@@ -178,9 +180,16 @@ class MoveTo: public RobotAction {
                      v = max(v * pow(2, -lambda * (odo_avg - cutoff_start)), 0.4);
                   }
 
+                  //
                   // correct left/right unbalance
+                  //
+                  
+                  // only use wheel counts since last time wheel ratio was set
+                  //int partial_left_count  = left_count - left_base;
+                  //int partial_right_count = right_count - right_base;
+
                   int error = left_count * wheel_ratio  - right_count;
-                  error = min(abs(error), 20) * sign(error);
+                  error = max(min(error, 20.0), -20.0);
                   if (previous_error >= 1e4) previous_error = error;
                   int error_deriv = error - previous_error;
                   float correction = error * kp + error_deriv * kd;

@@ -238,7 +238,11 @@ void loop() {
         distance = msg.params.move.distance;
         reply_to = msg.params.move.reply_to;
         robot_action = move_to;
-        robot_action->begin();
+
+        if (robot_action->is_running())
+          robot_action->set_odometer(0,0);
+        else
+          robot_action->begin();
 
         //
         float d = speed * sin(0.5 * direction * 3.1415927);
@@ -249,12 +253,14 @@ void loop() {
         float dir_left  = sgn(powerl);
         float dir_right = sgn(powerr);
         float ratio = 1.0;//abs(cos(direction * 3.14159));   powerl/powerr ???
+        if (dir_left>0 && dir_right > 0 && powerr>0)
+          ratio = powerl/powerr;
 
 
         robot_action->set_parameters(distance, ratio, speed, dir_left, dir_right);
         odometer.reset();
 
-        report(speed, direction, distance);
+        //report(speed, direction, distance, dir_left, dir_right, powerl, powerr);
         Serial3.print(" ");
         Serial3.print(speed);
         Serial3.print(" ");

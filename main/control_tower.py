@@ -41,8 +41,8 @@ class ProcessMessages (threading.Thread):
                 self.config.log.info("control tower received message %s" % msg.cmd )
                 data = np.array(msg.params['grid'])
                 robot_position = msg.params['robot_position']
-                robot_position[0] = int(np.round(robot_position[0]))
-                robot_position[1] = int(np.round(robot_position[1]))
+                #robot_position[0] = int(np.round(robot_position[0]))
+                #robot_position[1] = int(np.round(robot_position[1]))
 
                 planner_path = msg.params['path']
 
@@ -191,12 +191,15 @@ class Application(tk.Frame):
             create_rectangles = True if len(self.rectangles) == 0 else False
             rectangle_index = 0
 
+            c_robot = int(np.round(self.robot_position[0]))
+            r_robot = int(np.round(self.robot_position[1]))
+
             for r in range(0, n_rows):
                 for c in range(0, n_columns):    
                     # assign one of the grayXX colors 
                     clr = "gray" + str(int(99*self.map_data[n_rows-r-1,c]/255.0))
                     # if robot is here color red
-                    if (self.robot_position[0] == c ) and (self.robot_position[1] == n_rows-r-1):
+                    if (c_robot == c ) and (r_robot == n_rows-r-1):
                         # current robot position
                         clr = "red"
                     elif [c, n_rows-r-1] in self.planner_path:
@@ -226,8 +229,8 @@ class Application(tk.Frame):
                 self.show_target_icon(x,y)
 
             # show robot positon
-            x  = (self.robot_position[0]+0.5) * scale_x - 10
-            y  = (n_rows-1.0-self.robot_position[1] + 0.5) * scale_y - 10
+            x  = int(np.round((self.robot_position[0]+0.5) * scale_x - 10.))
+            y  = int(np.round((n_rows-1.0-self.robot_position[1] + 0.5) * scale_y - 10.))
             theta=self.robot_position[2]
             self.show_robot_icon(x,y,theta)
 

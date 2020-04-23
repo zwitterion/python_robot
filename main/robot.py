@@ -54,7 +54,7 @@ class Robot():
         self.last_robot_orientation = 999
 
         self.steps_per_turn = 98.0
-        self.steps_per_cell = 20.
+        self.steps_per_cell = 15.
 
         return
 
@@ -94,6 +94,9 @@ class Robot():
         
         self.start()
 
+        # stop any robot movement 
+        self.stop()
+
         while True:
             try:
                 msg = self.message_bus.receive(self.name)
@@ -114,8 +117,8 @@ class Robot():
 
 
             except Exception as e:
-                exc_type, exc_obj, exc_tb = sys.exc_info()
-                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                exc_type, _, exc_tb = sys.exc_info()
+                #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
                 self.config.log.error("{} got exception: type:{} line: {}".format(self.name, exc_type, exc_tb.tb_lineno))
                 traceback.print_exc()
 
@@ -129,39 +132,55 @@ class Robot():
         self.target_position = msg.params['target_position']
         self.path = msg.params['path']
 
+        if self.state == RobotStates.is_idle and len(self.path) <1:
 
-        robot_orientation = self.get_current_orientation()
+            return
 
-        distance = 0
-        if self.state == RobotStates.is_moving:
-            distance = self.euclidean_distance(self.robot_position[0:2], self.next_stop)
+        
+        tgt_theta =  self.get_orientation_to_target( self.robot_position[0:2], self.next_stop)
 
-        path_error = self.get_path_error()
-        #print("error", path_error)
+        # self.target_theta
+        robot_orientation = self.get_current_orientation()        
+        #orientation_error = (robot_orientation - tgt_theta) if tgt_theta is not None else 0
+        orientation_error = self.rotation_angle(tgt_theta, robot_orientation)
 
-
-        self.config.log.info("state: %s  x: %6.2f y: %6.2f odom.: (L:%3d, R:%3d) ed=%6.2f trgt theta: %6.2f curr. theta: %6.2f error: %6.2f" % 
+        self.config.log.info("state: %s c_xy(%6.2f,%6.2f) t_xy(%6.2f,%6.2f) odo: (L:%3d, R:%3d) tgt theta: %6.2f theta: %6.2f error: %6.2f" % 
                 (RobotStates.to_string(self.state), 
                 self.robot_position[0], 
                 self.robot_position[1], 
+                self.path[0][0],
+                self.path[0][1],
                 self.odometer.left_wheel,
                 self.odometer.right_wheel,
-                distance,
-                self.target_theta, 
-                robot_orientation,
-                path_error))
+                tgt_theta, 
+                robot_orientation ,
+                orientation_error))
 
-        # if robot is busy and the path has changed then something is wrong - tell robot to cancel 
-        # then it will continue with the new path
+        if self.state == RobotStates.is_rotating:
+            if self.active_path[-1] != self.path[-1]: 
+                print ("STOP ROTATION TGT HAS CHANGED")
+                print("path:", self.path,"\n", "active:", self.active_path[-len(self.path):] )
+                self.stop()
+
         if self.state == RobotStates.is_moving:
-            #@@@@@@@
-            #if self.path != self.active_path[len(self.active_path)-len(self.path):]:
             if (len(self.path)>=2) and (self.active_path[-len(self.path):][0:2] != self.path[0:2]): 
+                # if robot is busy and the path has changed then something is wrong - tell robot to cancel 
+                # then it will continue with the new path
                 print ("STOP !!!!!!!!!!!*****************************")
                 print("path:", self.path,"\n", "active:", self.active_path[-len(self.path):] )
                 self.stop()
             else:
-                self.send_move_error(path_error)
+                # update move parameters
+                 # get max travel distance (without requiring a rotation)
+                distance = self.get_max_distance(self.path)
+                if (distance < len(self.path)):
+                    self.next_stop = self.path[distance]
+                    euclidean_distance = self.euclidean_distance(self.robot_position[0:2], self.next_stop)
+                    heading = np.clip(-orientation_error, -5, 5)
+                    speed = 0.6 if distance >= 2 else 0.3
+                    self.move(euclidean_distance, speed=speed, heading=heading)
+                else:
+                    print("Why is distance wrong?", distance, self.path)
 
         if self.state == RobotStates.is_waiting_for_map_update:
             if self.is_orientation_stable(robot_orientation): 
@@ -189,7 +208,8 @@ class Robot():
             self.odometer.right_wheel = msg.params[3]
 
         # wait for next map/position update (and ofr the orientation become stable)
-        self.state  = RobotStates.is_waiting_for_map_update
+        if self.state != RobotStates.is_idle:
+            self.state = RobotStates.is_waiting_for_map_update
 
         return
 
@@ -255,26 +275,32 @@ class Robot():
         # keep a copy of the path so we can detect changes while robot is busy executig a command
         self.active_path = self.path
 
+
+        # get max travel distance (without requiring a rotation)
+        distance = self.get_max_distance(self.path)
         
         # next_orientation 
-        theta = self.get_cell_rotation(self.path[0], self.path[1])
+        #theta = self.get_cell_rotation(self.path[0], self.path[1])
 
+        # angle of vector from current robot position to next target position
+        # might be slightly difference than starting from self.path[0]
+        theta = self.get_orientation_to_target( self.robot_position[0:2], self.path[distance])
+
+        # where is robot pointing at
         robot_orientation = self.get_current_orientation()
 
         self.target_theta = theta
 
-        if not self.rotate(theta, robot_orientation):
-            # if we don't need to rotate then move
-            distance = self.get_max_distance(self.path)
+        # rotate the robot so it points to the target
+        if not self.rotate(theta, robot_orientation): 
             
+            # if we don't need to rotate then move
             self.next_stop = self.path[distance]
             assert distance>=0, "distance should be >=0"
             
             if (distance>0):
-            
                 next_stop = self.path[distance]
                 euclidean_distance = self.euclidean_distance(self.robot_position[0:2], next_stop)
-
                 self.move(euclidean_distance)
             else:
                 self.state = RobotStates.is_idle
@@ -306,6 +332,41 @@ class Robot():
 
         return alpha
 
+    def get_orientation_to_target(self, a, b):
+        """
+            returns tangent a-b
+            =IF(F2<>0,ATAN(G2/F2), SIGN(G2)*PI()/2) + IF(F2>=0,0, IF(G2>=0,PI(), -PI()))
+            normalize so it returns values between [0, 180] for CCW rotations or (-0, -180) for CW rotations
+        """
+        (x1, y1) = a
+        (x2,y2) = b
+        alpha = 0
+
+        dx = x2-x1
+        dy = y2-y1
+        alpha = (math.atan(dy/dx) if (dx!=0) else np.sign(dy) * (np.pi/2.0)) + (0.0 if (dx>=0) else np.pi if dy>=0 else -np.pi)
+
+        return (alpha * 360.) / (2.*np.pi)
+
+    def rotation_angle(self, alpha, robot_orientation):
+        
+        CW = 1
+        CCW = -1
+        heading = 0
+
+        if (alpha>robot_orientation):
+            d1 = alpha - robot_orientation
+            d2 = 360-alpha+robot_orientation
+            delta = min(d1,d2)
+            heading = delta * (CCW if (d1<d2) else CW)
+        else:
+            d1 = robot_orientation - alpha 
+            d2 = 360-robot_orientation+alpha
+            delta = min(d1,d2)
+            heading = delta * (CW if (d1<d2) else CCW)
+        return heading
+
+
     def rotate(self, alpha, robot_orientation):
 
         speed = 0.3
@@ -331,7 +392,7 @@ class Robot():
         assert steps >= 0, "invalid # of steps"
 
         rotate_threshold_in_steps = 2
-        # rotating for small distances does not work quite well with this robot
+        # rotating for small distances does not work quite well with this robot???
         # and can start oscillating...
         # todo: upgrade arduino code to use microsteps for higher resolution..
         if (steps>rotate_threshold_in_steps):
@@ -346,9 +407,8 @@ class Robot():
 
    
 
-    def move(self, distance, speed=0.6):
+    def move(self, distance, speed=0.6, heading=0):
         
-        heading = 0
         #next_stop = self.path[distance]
         #distance = self.euclidean_distance(self.robot_position[0:2], next_stop)
         steps = int(distance * self.steps_per_cell)
